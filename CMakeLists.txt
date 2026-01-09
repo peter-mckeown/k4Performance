@@ -47,5 +47,6 @@ function(set_test_env _testname)
 endfunction()
 
 add_subdirectory(RecoMCTruthLinkers)
+add_subdirectory(Di-ParticlePerformance/Di-ParticleAnalysis)
 
 include(cmake/CreateProjectConfig.cmake)
