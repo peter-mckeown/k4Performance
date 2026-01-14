@@ -27,6 +27,7 @@ gaudi_add_module(GaudiDiPhotonAnaPlugins
         Gaudi::GaudiKernel
         k4FWCore::k4FWCore
         EDM4HEP::edm4hep
+        DD4hep::DDRec
     )
 
 install(TARGETS GaudiDiPhotonAnaPlugins
