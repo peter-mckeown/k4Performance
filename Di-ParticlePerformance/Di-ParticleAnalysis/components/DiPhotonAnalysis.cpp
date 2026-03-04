@@ -8,6 +8,15 @@
 
 #include "k4FWCore/Consumer.h"
 
+#include "GaudiKernel/ITHistSvc.h"
+#include "GaudiKernel/SmartIF.h"
+
+// Testing
+#include <Gaudi/Functional/Producer.h>
+
+#include "TH1F.h"
+#include "TH2F.h"
+
 #include "edm4hep/ReconstructedParticleCollection.h"
 #include "edm4hep/MCParticleCollection.h"
 #include "edm4hep/ClusterCollection.h"
@@ -21,14 +30,14 @@
 
 using dd4hep::rec::Vector3D;
 
-namespace{
-
+/*
 struct ObjectIDLess {
     bool operator()(const podio::ObjectID& a, const podio::ObjectID& b) const noexcept {
       return (a.collectionID < b.collectionID) ||
              (a.collectionID == b.collectionID && a.index < b.index);
     }
   };
+*/
 
 // A structure to hold photon PFO information, and pointer to the original pfo
 struct PhotonPFO {
@@ -36,6 +45,21 @@ struct PhotonPFO {
   Vector3D position;
   const edm4hep::ReconstructedParticle* pfo;
 };
+
+/*
+struct DiPhotonAnalysis : Gaudi::Functional::Producer<int()> {
+
+  DiPhotonAnalysis(const std::string& name, ISvcLocator* svcLoc)
+    : Producer(name, svcLoc,
+                KeyValue{"OutputLocation", "DummyInt"}) {}
+    
+      int operator()() const override {
+    debug() << "RUNNING" << endmsg;
+    return StatusCode::SUCCESS;
+  }
+};
+*/
+    
 
 // Core DiPhotonAnalysis algo
 struct DiPhotonAnalysis final
@@ -49,36 +73,90 @@ struct DiPhotonAnalysis final
         KeyValues("InputPFOs",          {"PandoraPFOs"}),
         KeyValues("InputMCParticles",   {"MCParticles"}),
         KeyValues("InputClusters",    {"PandoraClusters"}),
-        KeyValues("InputRecoMC",      {"MCTruthRecoLink"})
+        KeyValues("InputRecoMC",      {"RecoMCTruthLink"})
     }) {}
+
 
     /// This part is all for plotting
     // Services & booking flag
-    //mutable SmartIF<ITHistSvc> m_histSvc;
-    //mutable bool m_booked = false;
+    /// Move to header?
+    mutable SmartIF<ITHistSvc> m_histSvc;     
+    mutable TH1F *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_Frag_Energy=nullptr;
+    Gaudi::Property<std::string> m_histPath{this,"HistPath","/PLOTS",
+      "THistSvc directory (must include stream, e.g. '/PLOTS/...')."};
+    Gaudi::Property<int> m_bins_sep {this, "SeparationBins", 18, "True photon separation [mm]"};
+    Gaudi::Property<double> m_min_sep {this, "MinSep", 0.0, "Minimum separation [mm]"};
+    Gaudi::Property<double> m_max_sep {this, "MaxSep", 90.0, "Maximum separation [mm]"};
+    bool ok_nPFO_photon=true;
+    bool ok_nPFO=true;
+    bool ok_Frag_Energy=true;
 
-    /*
-    std::map createMCPFOMaps(const edm4hep::MCParticleCollection& mcpColl, 
-                            const edm4hep::ReconstructedParticleCollection& pfoColl,
-                            const edm4hep::RecoMCParticleLinkCollection& linkColl){
-                                // Transcribed from original LCIO, following Anna's implementation: https://github.com/Zehvogel/k4Performance/blob/main/PFlowValidation/components/PFOtoMCviaClusterLink.cpp
-                                
-                                // Index MC Particle by Object ID
-                                std::map<podio::ObjectID, size_t, ObjectIDLess> mcIndex;
-                                for (size_t i=0; i<mcpColl.size(); ++i) mcIndex[ mcpColl[i].getObjectID() ] = i;
+   
+  //  std::map createMCPFOMaps(const edm4hep::MCParticleCollection& mcpColl, 
+  //                          const edm4hep::ReconstructedParticleCollection& pfoColl,
+  //                          const edm4hep::RecoMCParticleLinkCollection& linkColl){
+  //                              // Transcribed from original LCIO, following Anna's implementation: https://github.com/Zehvogel/k4Performance/blob/main/PFlowValidation/components/PFOtoMCviaClusterLink.cpp
+  //                              
+  //                              // Index MC Particle by Object ID
+  //                              std::map<podio::ObjectID, size_t, ObjectIDLess> mcIndex;
+  //                              for (size_t i=0; i<mcpColl.size(); ++i) mcIndex[ mcpColl[i].getObjectID() ] = i;
+  //
+  //                             // Collect primaries in vector
+  //                            std::vector<>
+  //   }
 
-                                // Collect primaries in vector
-                                std::vector<>
-     }
-      */
+
+    /// Initialize histograms etc
+    StatusCode initialize() override{
+
+      if (Gaudi::Algorithm::initialize().isFailure()){
+        return StatusCode::FAILURE;
+      }
+
+      m_histSvc = service("THistSvc", true);
+      if (!m_histSvc){
+          error() << "Could not get THistSvc!"<< endmsg;
+          return StatusCode::FAILURE;
+      }
+
+      // Register histograms
+    auto reg = [&](TH1* h){
+      const std::string full = m_histPath.value() + "/" + h->GetName();
+      return m_histSvc->regHist(full, h).isSuccess();
+    };
+
+    h_nPFO_photons = new TH1F("Reco_photons_sep","Avg. No. Photon PFOs;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
+    ok_nPFO_photon&=reg(h_nPFO_photons);
+    if(!ok_nPFO_photon) {
+      error() << "Failed to register nPFO_photons histogram" <<endmsg;
+      return StatusCode::FAILURE;
+    }
+    h_nPFO = new TH1F("Reco_sep","Avg. No. PFOs;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
+    ok_nPFO&=reg(h_nPFO);
+    if(!ok_nPFO) {
+      error() << "Failed to register nPFO histogram" <<endmsg;
+      return StatusCode::FAILURE;
+    }
+    h_Frag_Energy = new TH1F("Frag_Energy","Fractional Fragment Energy;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
+    ok_Frag_Energy&=reg(h_Frag_Energy);
+    if(!ok_Frag_Energy){
+      error() << "Failed to register Fragment Energy histogram" <<endmsg;
+      return StatusCode::FAILURE;
+    }
+
+      debug() << "Did DiPhotonAnalysis Initialize " << endmsg;
+
+      return Consumer::initialize();
+    }
                                  
 
     void operator()(const edm4hep::ReconstructedParticleCollection& pfos,
                   const edm4hep::MCParticleCollection& mcps,
-                  const edm4hep::ClusterCollection& /*clus*/,
+                  const edm4hep::ClusterCollection&, //clus
                   const edm4hep::RecoMCParticleLinkCollection& RecoMCTruthLinks) const override {
 
-                    // Loop over all PFOs to separate photons PFOs and fragment energy.
+                    error() << " I AM A GOOD ALGORITHM THAT IS RUNNING " << endmsg;
+                    // Loop over all PFOs to separate photon PFOs and fragment energy.
                     int nPFOs = 0;
                     int nPFOPhotons = 0;
                     double Total_PFO_Energy = 0.0;
@@ -167,9 +245,8 @@ struct DiPhotonAnalysis final
                         E_Frag += pfo_energy;
                       }
                       Total_PFO_Energy += pfo_energy;
-                      ++nPFOs;                    
-
-                    }
+                      ++nPFOs;          
+                      
 
                     if (photonPFOs.empty()){
                       error() << "No photon PFOs found!" << endmsg;
@@ -210,6 +287,8 @@ struct DiPhotonAnalysis final
                         position_PFO_1.z() - position_PFO_2.z()
                     );
                     double PFO_separation = PFO_separation_vector.r();
+
+                    debug() << " frac_frag_energy = " << E_Frag / Total_PFO_Energy << endmsg;
 
                     // Now retrieve the MC truth associated with each photon PFO,
                     // choose MCParticle with the highest weight.
@@ -272,7 +351,7 @@ struct DiPhotonAnalysis final
                     else {
                        // Fallback: if there is only one candidate (for whatever reason), assign it as mcForPFO2 as well.
                        mcForPFO2 = mcForPFO1;
-                       debug() << "Only once PFO candidate found" << endmsg;
+                       debug() << "Only one PFO candidate found" << endmsg;
                     }
 
                   }
@@ -326,6 +405,14 @@ struct DiPhotonAnalysis final
 
                     /// Still to do: plotting workflow
 
+                    // Fill (weighted) histograms
+                    h_nPFO_photons->Fill(True_photon_separation, nPFOPhotons);
+                    h_nPFO->Fill(True_photon_separation, nPFOs);
+                    h_Frag_Energy->Fill(True_photon_separation, frac_frag_energy);
+                    debug() << "True_photon_separation: " << True_photon_separation << endmsg;
+
+
+
 
                     //createMCPFOMaps();
                     
@@ -333,8 +420,17 @@ struct DiPhotonAnalysis final
                     //MCtoPFOLink
 
                   }
+
+            }
+      
+      StatusCode finalize() override {
+        if (Gaudi::Algorithm::finalize().isFailure()) return StatusCode::FAILURE;
+
+        debug() << "Did DiPhotonAnalysis Finalize " << endmsg;
+        return Consumer::finalize();
+      }
       };
 
-    };
 
-    DECLARE_COMPONENT(DiPhotonAnalysis)
+
+DECLARE_COMPONENT(DiPhotonAnalysis)

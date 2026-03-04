@@ -54,4 +54,4 @@ Then run from ```build``` with:
 ```bash
 k4run ../Di-ParticlePerformance/Di-ParticleAnalysis/options/runDiPhotonPerformance.py --inputFiles ../Di-ParticlePerformance/tmp/ILDConfig/StandardConfig/production/Reco_test_REC.edm4hep.root
 ```
-
+source /cvmfs/sw.hsf.org/key4hep/releases/2025-05-29/x86_64-almalinux9-gcc14.2.0-opt/key4hep-stack/2025-05-30-4x4qya/setup.sh
