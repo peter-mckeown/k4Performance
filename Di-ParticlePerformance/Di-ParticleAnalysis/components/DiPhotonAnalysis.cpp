@@ -15,7 +15,7 @@
 #include <Gaudi/Functional/Producer.h>
 
 #include "TH1F.h"
-#include "TH2F.h"
+#include <TFile.h>
 
 #include "edm4hep/ReconstructedParticleCollection.h"
 #include "edm4hep/MCParticleCollection.h"
@@ -43,7 +43,7 @@ struct ObjectIDLess {
 struct PhotonPFO {
   double energy;
   Vector3D position;
-  const edm4hep::ReconstructedParticle* pfo;
+  edm4hep::ReconstructedParticle pfo;
 };
 
 /*
@@ -80,6 +80,7 @@ struct DiPhotonAnalysis final
     /// This part is all for plotting
     // Services & booking flag
     /// Move to header?
+    /*
     mutable SmartIF<ITHistSvc> m_histSvc;     
     mutable TH1F *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_Frag_Energy=nullptr;
     Gaudi::Property<std::string> m_histPath{this,"HistPath","/PLOTS",
@@ -90,8 +91,18 @@ struct DiPhotonAnalysis final
     bool ok_nPFO_photon=true;
     bool ok_nPFO=true;
     bool ok_Frag_Energy=true;
+    */
+
+    //// Attempt at Gaudi standalone histograms
+    Gaudi::Property<std::string> m_histPath{this,"HistPath","/PLOTS",
+      "THistSvc directory (must include stream, e.g. '/PLOTS/...')."};
+    Gaudi::Property<int> m_bins_sep {this, "SeparationBins", 18, "True photon separation [mm]"};
+    Gaudi::Property<double> m_min_sep {this, "MinSep", 0.0, "Minimum separation [mm]"};
+    Gaudi::Property<double> m_max_sep {this, "MaxSep", 90.0, "Maximum separation [mm]"};
 
    
+    mutable TH1F *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_Frag_Energy=nullptr;
+
   //  std::map createMCPFOMaps(const edm4hep::MCParticleCollection& mcpColl, 
   //                          const edm4hep::ReconstructedParticleCollection& pfoColl,
   //                          const edm4hep::RecoMCParticleLinkCollection& linkColl){
@@ -108,11 +119,26 @@ struct DiPhotonAnalysis final
 
     /// Initialize histograms etc
     StatusCode initialize() override{
+      
+      info() << "Initialising DiPhotonAnalysis" << endmsg;
+
+      //// Attempt at Gaudi standalone histograms
+      /*
+      mutable Gaudi::Accumulators::StaticHistogram<1> h_nPFO_photons{this, "Reco_photons_sep", "Avg. No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep};
+      mutable Gaudi::Accumulators::StaticHistogram<1> h_nPFO{this, "Reco_sep", "Avg. No. PFOs", m_bins_sep, m_min_sep, m_max_sep};
+      mutable Gaudi::Accumulators::StaticHistogram<1> h_Frag_Energy{this, "Frag_Energy", "Fractional Fragment Energy", m_bins_sep, m_min_sep, m_max_sep};
+      */
+
+
+      h_nPFO_photons = new TH1F("Reco_photons_sep","Avg. No. Photon PFOs;d_{#gamma#gamma sep}[mm];Avg. No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO = new TH1F("Reco_sep","Avg. No. PFOs;d_{#gamma#gamma sep}[mm];Avg. No. PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_Frag_Energy = new TH1F("Frag_Energy","Fractional Fragment Energy;d_{#gamma#gamma sep}[mm];Fractional Fragment Energy", m_bins_sep, m_min_sep, m_max_sep);
 
       if (Gaudi::Algorithm::initialize().isFailure()){
         return StatusCode::FAILURE;
       }
 
+      /*
       m_histSvc = service("THistSvc", true);
       if (!m_histSvc){
           error() << "Could not get THistSvc!"<< endmsg;
@@ -143,7 +169,7 @@ struct DiPhotonAnalysis final
       error() << "Failed to register Fragment Energy histogram" <<endmsg;
       return StatusCode::FAILURE;
     }
-
+    */
       debug() << "Did DiPhotonAnalysis Initialize " << endmsg;
 
       return Consumer::initialize();
@@ -155,7 +181,6 @@ struct DiPhotonAnalysis final
                   const edm4hep::ClusterCollection&, //clus
                   const edm4hep::RecoMCParticleLinkCollection& RecoMCTruthLinks) const override {
 
-                    error() << " I AM A GOOD ALGORITHM THAT IS RUNNING " << endmsg;
                     // Loop over all PFOs to separate photon PFOs and fragment energy.
                     int nPFOs = 0;
                     int nPFOPhotons = 0;
@@ -176,6 +201,9 @@ struct DiPhotonAnalysis final
                       const auto pfo_energy = pfo.getEnergy();
                       const auto cluster_vec = pfo.getClusters();
                       int no_clusters = cluster_vec.size();
+
+                      auto related_test = RecoMCTruthLinkNavigator.getLinked(pfo);
+                      debug() << "Test no. related mcps: " <<  related_test.size() << endmsg;
 
                       debug() << "No. Clusters in PFO: " << no_clusters << endmsg;
                       Vector3D pfo_position;
@@ -238,7 +266,7 @@ struct DiPhotonAnalysis final
                           PhotonPFO photon;
                           photon.energy = pfo_energy;
                           photon.position = pfo_position;
-                          photon.pfo = &pfo;
+                          photon.pfo = pfo;
                           photonPFOs.push_back(photon);
                       }
                       else {
@@ -246,7 +274,7 @@ struct DiPhotonAnalysis final
                       }
                       Total_PFO_Energy += pfo_energy;
                       ++nPFOs;          
-                      
+                    }  
 
                     if (photonPFOs.empty()){
                       error() << "No photon PFOs found!" << endmsg;
@@ -292,41 +320,72 @@ struct DiPhotonAnalysis final
 
                     // Now retrieve the MC truth associated with each photon PFO,
                     // choose MCParticle with the highest weight.
-                    const edm4hep::MCParticle* mcForPFO1 = nullptr;
-                    const edm4hep::MCParticle* mcForPFO2 = nullptr;
+                    //const edm4hep::MCParticle* mcForPFO1 = nullptr;
+                    //const edm4hep::MCParticle* mcForPFO2 = nullptr;
+
+                    edm4hep::MCParticle mcForPFO1;
+                    edm4hep::MCParticle mcForPFO2;
 
                     // Process the first photon PFO.
-                    const auto related1 = RecoMCTruthLinkNavigator.getLinked(*photonPFOs[0].pfo);
+                    debug() << "Photon PFO: " << typeid(photonPFOs[0].pfo).name() << endmsg;
+                    auto related1 = RecoMCTruthLinkNavigator.getLinked(photonPFOs[0].pfo);
+                    debug() << "Number of related MC particles to PFO1: " << related1.size() << endmsg;
                     if (!related1.empty()){
                       float max_weight = 0.;
                       for (const auto& [mclinked, weight] : related1){
+                        debug() << "PFO 1, Which MC ID? " << mclinked.id() << endmsg;
                         if (weight > max_weight){
                           max_weight = weight;
-                          mcForPFO1 = &mclinked;                        
+                          mcForPFO1 =  mclinked; //&mclinked;                       
                       }
                     }
                   }
-                  else {debug() << "No MC Particle linked to PFO" << endmsg;}
+                  else {warning() << "No MC Particle linked to PFO" << endmsg;}
 
+                  debug() << "Done First PFO linking" << endmsg;
                   // Process the second photon PFO, if available.
                   if (photonPFOs.size() > 1) {
-                    const auto related2 = RecoMCTruthLinkNavigator.getLinked(*photonPFOs[1].pfo);
+                    edm4hep::MCParticle Second_mcForPFO2;
+                    if (photonPFOs.size() > 2) {
+                      info() << "More than 2 photon PFOs; Leading two used in True Separation calculation" << endmsg;
+                    }
+                    debug() << "More than one Photon PFO" << endmsg;
+                    auto related2 = RecoMCTruthLinkNavigator.getLinked(photonPFOs[1].pfo);
+                    debug() << "Number of related MC particles to PFO2: " << related1.size() << endmsg;
                     if (!related2.empty()){
                       float max_weight = 0.;
+                      float max_weight_2_P2 = 0.;
                       for (const auto& [mclinked, weight] : related2){
+                        debug() << "PFO 2, Which MC ID? " << mclinked.id() << endmsg;
                         if (weight > max_weight){
                           max_weight = weight;
-                          mcForPFO2 = &mclinked;
+                          mcForPFO2 =  mclinked; //&mclinked; 
                         }
-                      } 
+                        
+                        // also record second highest energy photon PFO
+                        else if (weight < max_weight &&  weight> max_weight_2_P2){
+                              max_weight_2_P2 = weight;
+                              Second_mcForPFO2 = mclinked;
+                        }
+                              
+                      }
+                      // Incase largest weight linked photon is the same for both PFOs take second largest weight for second PFO
+                       if (mcForPFO1.id() == mcForPFO2.id()){
+                        if (Second_mcForPFO2.isAvailable()){
+                            mcForPFO2 = Second_mcForPFO2;
+                        }
+                      }
+                      
                     }
                   }
                   else {
                     // If there is only one photon PFO, use the MC truth candidates from the single PFO.
                     // Since there are always two MC particles (photons) in the event, we try to select the second-best candidate.
-                    const auto related = RecoMCTruthLinkNavigator.getLinked(*photonPFOs[0].pfo);
+                    const auto related = RecoMCTruthLinkNavigator.getLinked(photonPFOs[0].pfo);
+                    debug() << "Number of related MCParticles: " << related.size() << endmsg;
                     if (related.size() > 1) {
                       // First, find the index corresponding to the highest weight (already used for mcForPFO1).
+                      debug() << "More than one related mcParticles!!" << endmsg;
                       size_t index_max = 0;
                       float max_weight = 0.;
                       for (size_t i = 1; i < related.size(); i++){
@@ -339,14 +398,17 @@ struct DiPhotonAnalysis final
                       // Then, find the candidate with the next highest weight
                       size_t index_second = (index_max == 0) ? 1 : 0;
                       for (size_t i = 0; i < related.size(); i++){
-                        const auto& related_weight = related[i].weight;
-                        const auto& related_second_weight = related[index_second].weight;
+                        const auto related_weight = related[i].weight;
+                        const auto related_second_weight = related[index_second].weight;
+                        debug() << "related_weight" << related_weight<< "related_second_weight" << related_second_weight << endmsg;
                         if (i == index_max) continue;
                         if (related_weight > related_second_weight) {
                             index_second = i;
                         }
                       }
-                      mcForPFO2 = &related[index_second].o;
+                      auto& linked = related[index_second];
+                      mcForPFO2 = linked.o;  //&(linked.o);
+                      //Vector3D vertex2(mcForPFO2->getVertex().x, mcForPFO2->getVertex().y, mcForPFO2->getVertex().z);
                     }
                     else {
                        // Fallback: if there is only one candidate (for whatever reason), assign it as mcForPFO2 as well.
@@ -356,18 +418,22 @@ struct DiPhotonAnalysis final
 
                   }
 
+                  debug() << "Done ALL PFO linking" << endmsg;
                   // Extract MC truth information from the linked MCParticles.
                   double mc_photon_1_x = 0.0, mc_photon_1_y = 0.0, mc_photon_1_z = 0.0;
                   double mc_photon_2_x = 0.0, mc_photon_2_y = 0.0, mc_photon_2_z = 0.0;
                   Vector3D mc_photon_1_axis(0,0,0), mc_photon_2_axis(0,0,0);
 
-                   if(mcForPFO1){
-                      Vector3D vertex1(mcForPFO1->getVertex().x, mcForPFO1->getVertex().y, mcForPFO1->getVertex().z);
+                   //if(mcForPFO1){
+                   if (mcForPFO1.isAvailable()){
+                      debug() << "MC PFO1 " <<    typeid(mcForPFO1).name() << " " << mcForPFO1 << endmsg;
+                      Vector3D vertex1(mcForPFO1.getVertex().x, mcForPFO1.getVertex().y, mcForPFO1.getVertex().z);
                       mc_photon_1_x = vertex1.x();
                       mc_photon_1_y = vertex1.y();
                       mc_photon_1_z = vertex1.z();
-                      Vector3D momentum1(mcForPFO1->getMomentum().x, mcForPFO1->getMomentum().y, mcForPFO1->getMomentum().z);
+                      Vector3D momentum1(mcForPFO1.getMomentum().x, mcForPFO1.getMomentum().y, mcForPFO1.getMomentum().z);
                       double mag1 = momentum1.r();
+                      debug() << "MC for PFO 1: x:" << mc_photon_1_x <<  "y:" << mc_photon_1_y << "z:" << mc_photon_1_z << endmsg;
                       if(mag1 > 0) {
                           mc_photon_1_axis = Vector3D(
                               momentum1.x() / mag1,
@@ -375,15 +441,20 @@ struct DiPhotonAnalysis final
                               momentum1.z() / mag1
                           );
                       }
+                      debug() << "Done MC for PFO 1" << endmsg;
                     }
 
-                    if(mcForPFO2){
-                        Vector3D vertex2(mcForPFO2->getVertex().x, mcForPFO2->getVertex().y, mcForPFO2->getVertex().z);
+                    //if(mcForPFO2){
+                    if (mcForPFO2.isAvailable()){
+                      debug() << "MC PFO2 " <<    typeid(mcForPFO2).name() << " " <<  mcForPFO2 << endmsg;
+                      Vector3D vertex2(mcForPFO2.getVertex().x, mcForPFO2.getVertex().y, mcForPFO2.getVertex().z);
+                        debug() << "Got PFO 2 vertex" << endmsg;
                         mc_photon_2_x = vertex2.x();
                         mc_photon_2_y = vertex2.y();
                         mc_photon_2_z = vertex2.z();
-                        Vector3D momentum2(mcForPFO2->getMomentum().x, mcForPFO2->getMomentum().y, mcForPFO2->getMomentum().z);
+                        Vector3D momentum2(mcForPFO2.getMomentum().x, mcForPFO2.getMomentum().y, mcForPFO2.getMomentum().z);
                         double mag2 = momentum2.r();
+                        debug() << "MC for PFO 2: x:" << mc_photon_2_x <<  "y:" << mc_photon_2_y << "z:" << mc_photon_2_z << endmsg;
                         if(mag2 > 0) {
                             mc_photon_2_axis = Vector3D(
                                 momentum2.x() / mag2,
@@ -391,11 +462,13 @@ struct DiPhotonAnalysis final
                                 momentum2.z() / mag2
                             );
                         }
+                        debug() << "Done MC for PFO 2" << endmsg;
                     }
 
-
+                    debug() << "About to get true di-photon separation" << endmsg;
                     double True_photon_separation = 0.0;
-                    if(mcForPFO1 && mcForPFO2){
+                    //if(mcForPFO1 && mcForPFO2){
+                    if (mcForPFO1.isAvailable() && mcForPFO2.isAvailable()){
                         True_photon_separation = std::sqrt(
                             std::pow(mc_photon_2_x - mc_photon_1_x, 2) +
                             std::pow(mc_photon_2_y - mc_photon_1_y, 2) +
@@ -403,31 +476,51 @@ struct DiPhotonAnalysis final
                         );
                     }
 
+
+                     debug() << "True_photon_separation: " << True_photon_separation << endmsg;
+
                     /// Still to do: plotting workflow
+
+                    debug() << "About to fill histograms" << endmsg;
+
+                    // Fill (weighted) histograms
+                    // Gaudi
+                    /*
+                    h_nPFO_photons += std::make_pair(True_photon_separation, nPFOPhotons);
+                    h_nPFO += std::make_pair(True_photon_separation, nPFOs);
+                    h_Frag_Energy += std::make_pair(True_photon_separation, frac_frag_energy);
+                    */
 
                     // Fill (weighted) histograms
                     h_nPFO_photons->Fill(True_photon_separation, nPFOPhotons);
                     h_nPFO->Fill(True_photon_separation, nPFOs);
                     h_Frag_Energy->Fill(True_photon_separation, frac_frag_energy);
-                    debug() << "True_photon_separation: " << True_photon_separation << endmsg;
-
-
-
 
                     //createMCPFOMaps();
                     
                     //PFOtoMCLink
                     //MCtoPFOLink
 
-                  }
-
             }
       
       StatusCode finalize() override {
+
+        auto file = TFile::Open("DiPhoton_histograms.root", "RECREATE");
+
+        h_nPFO_photons->Write();
+        delete h_nPFO_photons;
+        h_nPFO->Write();
+        delete h_nPFO;
+        h_Frag_Energy->Write();
+        delete h_Frag_Energy;
+
+        file->Close();
+
+
         if (Gaudi::Algorithm::finalize().isFailure()) return StatusCode::FAILURE;
 
         debug() << "Did DiPhotonAnalysis Finalize " << endmsg;
-        return Consumer::finalize();
+        return StatusCode::SUCCESS;
       }
       };
 

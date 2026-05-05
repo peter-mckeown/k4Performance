@@ -8,10 +8,13 @@ from k4FWCore.parseArgs import parser
 from Configurables import (
     DiPhotonAnalysis,
     EventDataSvc,
-    THistSvc,
+    #THistSvc,
+    RootHistSvc,
     AuditorSvc,
     AlgTimingAuditor,
 )
+
+from Configurables import Gaudi__Histograming__Sink__Root as RootHistoSink
 
 parser_group = parser.add_argument_group("runDiPhotonPerformance.py custom options")
 parser_group.add_argument("-in","--inputFiles", action="extend", nargs="+", metavar=("file1", "file2"), help="One or multiple input files")
@@ -28,20 +31,23 @@ ILDDiPhoton.InputPFOs = ["PandoraPFOs"]
 ILDDiPhoton.InputMCParticles = ["MCParticles"]
 ILDDiPhoton.InputClusters = ["PandoraClusters"]
 ILDDiPhoton.InputRecoMC   = ["RecoMCTruthLink"]
-ILDDiPhoton.HistPath = "/PLOTS"
+#ILDDiPhoton.HistPath = "/PLOTS"
 
 # Use Gaudi Auditor service to get algorithm timing information
 auditorSvc = AuditorSvc()
 auditorSvc.Auditors = [AlgTimingAuditor()]
 
 ## Histogram output (THistSvc)
-THistSvc().Output = [f"PLOTS DATAFILE='{parsed_args.outputBasename}.root' OPT='RECREATE' TYP='ROOT'"]
+#THistSvc().Output = [f"PLOTS DATAFILE='{parsed_args.outputBasename}.root' OPT='RECREATE' TYP='ROOT'"]
+hps = RootHistSvc("HistogramPersistencySvc")
+root_hist_svc = RootHistoSink("RootHistoSink")
+root_hist_svc.FileName = "DiPhoton_histograms.root"
 
 # Configure application manager
 app_mgr = ApplicationMgr(
         TopAlg=[ILDDiPhoton],
-        EvtSel="None",
-        EvtMax=-1,
-        ExtSvc=[EventDataSvc("EventDataSvc"), auditorSvc, THistSvc("THistSvc"),iosvc],
+        EvtSel="NONE",
+        EvtMax= -1,
+        ExtSvc=[EventDataSvc("EventDataSvc"), auditorSvc, iosvc, root_hist_svc], #THistSvc("THistSvc"),iosvc],
         OutputLevel=DEBUG,
 )
