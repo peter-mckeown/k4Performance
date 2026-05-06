@@ -16,6 +16,8 @@
 
 #include "TH1F.h"
 #include <TFile.h>
+#include <TH1D.h>
+#include <TCanvas.h>
 
 #include "edm4hep/ReconstructedParticleCollection.h"
 #include "edm4hep/MCParticleCollection.h"
@@ -101,7 +103,7 @@ struct DiPhotonAnalysis final
     Gaudi::Property<double> m_max_sep {this, "MaxSep", 90.0, "Maximum separation [mm]"};
 
    
-    mutable TH1F *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_Frag_Energy=nullptr;
+    mutable TH1D *h_nPFO_photons_counts=nullptr, *h_nPFO_photons_weighted=nullptr, *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_nPFO_counts=nullptr, *h_nPFO_weighted=nullptr, *h_Frag_Energy=nullptr;
 
   //  std::map createMCPFOMaps(const edm4hep::MCParticleCollection& mcpColl, 
   //                          const edm4hep::ReconstructedParticleCollection& pfoColl,
@@ -116,7 +118,44 @@ struct DiPhotonAnalysis final
   //                            std::vector<>
   //   }
 
+  /*
+    TH1D* h_avg plot_weighted_average (const std::vector<double>& data,
+                                const std::vector<double>& weights,
+                                const int& nbins,
+                                const double& minE,
+                                const double& maxE){
 
+      std::vector<double> bin_edges(nbins+1);
+
+      double bin_width = (maxE - minE) / nbins;
+      for (int i = 0; i <= nbins; ++i) {
+        bin_edges[i] = minE + i*bin_width;
+      }
+
+      // Histograms
+      TH1D* h_counts   = new TH1D("h_counts", "counts", nbins, &bin_edges[0]);
+      TH1D* h_weighted = new TH1D("h_weighted", "weighted", nbins, &bin_edges[0]);
+      TH1D* h_avg      = (TH1D*)h_weighted->Clone("h_avg"); 
+
+      // Fill counts and weighted sums
+      for (size_t i = 0; i < data.size(); ++i) {
+          h_counts->Fill(data[i]);
+          h_weighted->Fill(data[i], weights[i]);
+      }
+
+      // Compute bin-wise average
+      h_avg->Divide(h_weighted, h_counts, "B");  // h_avg = h_weighted / h_counts
+
+      // Modify histogram style
+      h_avg->SetLineColor(kBlue);
+      h_avg->SetLineWidth(2);
+      h_avg->SetFillStyle(0);    // no fill (step)
+      h_avg->SetLineStyle(1);    // solid line
+
+      return h_avg;
+
+    }
+      */
     /// Initialize histograms etc
     StatusCode initialize() override{
       
@@ -130,9 +169,13 @@ struct DiPhotonAnalysis final
       */
 
 
-      h_nPFO_photons = new TH1F("Reco_photons_sep","Avg. No. Photon PFOs;d_{#gamma#gamma sep}[mm];Avg. No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
-      h_nPFO = new TH1F("Reco_sep","Avg. No. PFOs;d_{#gamma#gamma sep}[mm];Avg. No. PFOs", m_bins_sep, m_min_sep, m_max_sep);
-      h_Frag_Energy = new TH1F("Frag_Energy","Fractional Fragment Energy;d_{#gamma#gamma sep}[mm];Fractional Fragment Energy", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO_photons_counts = new TH1D("Reco_photons_sep_counts","No. Photon PFOs;d_{#gamma#gamma sep}[mm]; No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO_photons_weighted = new TH1D("Reco_photons_sep_weighted","weighted No. Photon PFOs;d_{#gamma#gamma sep}[mm];weighted No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO_photons = (TH1D*)h_nPFO_photons_weighted->Clone("Reco_photons_sep");
+      h_nPFO_counts = new TH1D("Reco_sep_counts","No. PFOs;d_{#gamma#gamma sep}[mm];No. PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO_weighted = new TH1D("Reco_sep_weighted","weighted No. PFOs;d_{#gamma#gamma sep}[mm];weighted No. PFOs", m_bins_sep, m_min_sep, m_max_sep);
+      h_nPFO = (TH1D*)h_nPFO_weighted->Clone("Reco_sep_weighted");
+      h_Frag_Energy = new TH1D("Frag_Energy","Fractional Fragment Energy;d_{#gamma#gamma sep}[mm];Fractional Fragment Energy", m_bins_sep, m_min_sep, m_max_sep);
 
       if (Gaudi::Algorithm::initialize().isFailure()){
         return StatusCode::FAILURE;
@@ -331,11 +374,11 @@ struct DiPhotonAnalysis final
                     auto related1 = RecoMCTruthLinkNavigator.getLinked(photonPFOs[0].pfo);
                     debug() << "Number of related MC particles to PFO1: " << related1.size() << endmsg;
                     if (!related1.empty()){
-                      float max_weight = 0.;
+                      float max_weight_MC1 = 0.;
                       for (const auto& [mclinked, weight] : related1){
                         debug() << "PFO 1, Which MC ID? " << mclinked.id() << endmsg;
-                        if (weight > max_weight){
-                          max_weight = weight;
+                        if (weight > max_weight_MC1){
+                          max_weight_MC1 = weight;
                           mcForPFO1 =  mclinked; //&mclinked;                       
                       }
                     }
@@ -389,31 +432,36 @@ struct DiPhotonAnalysis final
                       size_t index_max = 0;
                       float max_weight = 0.;
                       for (size_t i = 1; i < related.size(); i++){
-                        const auto& related_weight = related[i].weight;
+                        const auto related_weight = related[i].weight;
                         if (related_weight > max_weight) {
                           max_weight = related_weight;
                           index_max = i;
                         }
                       }
-                      // Then, find the candidate with the next highest weight
+                      // check this actually corresponds to the highest weight mc link used for PFO_1
+                      if (mcForPFO1.id() != related[index_max].o.id()) {warning() << "non-matching highest weighted MC in single PFO scenario!" << endmsg;}
+                      mcForPFO1 = related[index_max].o;
+
+                      debug() << "mcForPFO1.id() " << mcForPFO1.id() << "related[index_max].o.id() " << related[index_max].o.id()  << endmsg;// Then, find the candidate with the next highest weight
                       size_t index_second = (index_max == 0) ? 1 : 0;
                       for (size_t i = 0; i < related.size(); i++){
                         const auto related_weight = related[i].weight;
                         const auto related_second_weight = related[index_second].weight;
                         debug() << "related_weight" << related_weight<< "related_second_weight" << related_second_weight << endmsg;
                         if (i == index_max) continue;
-                        if (related_weight > related_second_weight) {
+                        if ((related_weight > related_second_weight) && (related_weight < max_weight)) {
                             index_second = i;
                         }
                       }
-                      auto& linked = related[index_second];
+                      //debug() << "Index_second" << index_second << "value: " << related[index_second] << endmsg;
+                      auto linked = related[index_second];
                       mcForPFO2 = linked.o;  //&(linked.o);
                       //Vector3D vertex2(mcForPFO2->getVertex().x, mcForPFO2->getVertex().y, mcForPFO2->getVertex().z);
                     }
                     else {
                        // Fallback: if there is only one candidate (for whatever reason), assign it as mcForPFO2 as well.
                        mcForPFO2 = mcForPFO1;
-                       debug() << "Only one PFO candidate found" << endmsg;
+                       debug() << "Only one MC candidate found" << endmsg;
                     }
 
                   }
@@ -491,9 +539,13 @@ struct DiPhotonAnalysis final
                     h_Frag_Energy += std::make_pair(True_photon_separation, frac_frag_energy);
                     */
 
+                    // Fill histograms
+                    h_nPFO_photons_counts->Fill(True_photon_separation);
+                    h_nPFO_counts->Fill(True_photon_separation);
+
                     // Fill (weighted) histograms
-                    h_nPFO_photons->Fill(True_photon_separation, nPFOPhotons);
-                    h_nPFO->Fill(True_photon_separation, nPFOs);
+                    h_nPFO_photons_weighted->Fill(True_photon_separation, nPFOPhotons);
+                    h_nPFO_weighted->Fill(True_photon_separation, nPFOs);
                     h_Frag_Energy->Fill(True_photon_separation, frac_frag_energy);
 
                     //createMCPFOMaps();
@@ -507,10 +559,16 @@ struct DiPhotonAnalysis final
 
         auto file = TFile::Open("DiPhoton_histograms.root", "RECREATE");
 
+        h_nPFO_photons->Divide(h_nPFO_photons_weighted, h_nPFO_photons_counts);
         h_nPFO_photons->Write();
         delete h_nPFO_photons;
+        delete h_nPFO_photons_weighted;
+        delete h_nPFO_photons_counts;
+        h_nPFO->Divide(h_nPFO_weighted, h_nPFO_counts);
         h_nPFO->Write();
         delete h_nPFO;
+        delete h_nPFO_weighted;
+        delete h_nPFO_counts;
         h_Frag_Energy->Write();
         delete h_Frag_Energy;
 
