@@ -8,16 +8,11 @@
 
 #include "k4FWCore/Consumer.h"
 
-#include "GaudiKernel/ITHistSvc.h"
-#include "GaudiKernel/SmartIF.h"
-
 // Testing
 #include <Gaudi/Functional/Producer.h>
 
-#include "TH1F.h"
 #include <TFile.h>
 #include <TH1D.h>
-#include <TCanvas.h>
 
 #include "edm4hep/ReconstructedParticleCollection.h"
 #include "edm4hep/MCParticleCollection.h"
@@ -28,74 +23,56 @@
 #include "podio/ObjectID.h"
 #include "podio/LinkNavigator.h"
 
-#include "DDRec/Vector3D.h" //Remove DD4hep dependency?
+#include "DDRec/Vector3D.h"
 
 using dd4hep::rec::Vector3D;
 
-/*
-struct ObjectIDLess {
-    bool operator()(const podio::ObjectID& a, const podio::ObjectID& b) const noexcept {
-      return (a.collectionID < b.collectionID) ||
-             (a.collectionID == b.collectionID && a.index < b.index);
-    }
-  };
+
+/** @struct DiPhotonAnalysis
+* Gaudi Consumer that analyses the reconstruction performance for two photons of varying separations
+* in terms of the number of reconstructions PFOs (and PFOs id'd as photons). The Fragment energy
+* (amount of energy not contained in the two leading PFOs) is also recorded. The true separation
+* between the incident photons is calculated from the MC particles linked to the PFOs.
+
+* input:
+*   - --inputFiles: input edm4hep file(s)
+*   - PandoraPFOs: edm4hep::ReconstructedParticleCollection
+*   - MCParticles: edm4hep::MCParticleCollection
+*   - RecoMCTruthLink: RecoMCParticleLinkCollection
+*
+* output:
+*   - ROOT file with name defined in options file
+*
+*  @author Peter McKeown, CERN
+*  @date May 2026
 */
 
-// A structure to hold photon PFO information, and pointer to the original pfo
+// A structure to hold photon PFO information
 struct PhotonPFO {
   double energy;
   Vector3D position;
   edm4hep::ReconstructedParticle pfo;
 };
 
-/*
-struct DiPhotonAnalysis : Gaudi::Functional::Producer<int()> {
-
-  DiPhotonAnalysis(const std::string& name, ISvcLocator* svcLoc)
-    : Producer(name, svcLoc,
-                KeyValue{"OutputLocation", "DummyInt"}) {}
-    
-      int operator()() const override {
-    debug() << "RUNNING" << endmsg;
-    return StatusCode::SUCCESS;
-  }
-};
-*/
-    
+  
 
 // Core DiPhotonAnalysis algo
 struct DiPhotonAnalysis final
     : k4FWCore::Consumer<void(const edm4hep::ReconstructedParticleCollection&,
                         const edm4hep::MCParticleCollection&,
-                        const edm4hep::ClusterCollection&,
+                        //const edm4hep::ClusterCollection&,
                         const edm4hep::RecoMCParticleLinkCollection&)> {
 
     DiPhotonAnalysis(const std::string& name, ISvcLocator* svcLoc)
     : Consumer(name, svcLoc, {
         KeyValues("InputPFOs",          {"PandoraPFOs"}),
         KeyValues("InputMCParticles",   {"MCParticles"}),
-        KeyValues("InputClusters",    {"PandoraClusters"}),
+        //KeyValues("InputClusters",    {"PandoraClusters"}),
         KeyValues("InputRecoMC",      {"RecoMCTruthLink"})
     }) {}
 
 
-    /// This part is all for plotting
-    // Services & booking flag
-    /// Move to header?
-    /*
-    mutable SmartIF<ITHistSvc> m_histSvc;     
-    mutable TH1F *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_Frag_Energy=nullptr;
-    Gaudi::Property<std::string> m_histPath{this,"HistPath","/PLOTS",
-      "THistSvc directory (must include stream, e.g. '/PLOTS/...')."};
-    Gaudi::Property<int> m_bins_sep {this, "SeparationBins", 18, "True photon separation [mm]"};
-    Gaudi::Property<double> m_min_sep {this, "MinSep", 0.0, "Minimum separation [mm]"};
-    Gaudi::Property<double> m_max_sep {this, "MaxSep", 90.0, "Maximum separation [mm]"};
-    bool ok_nPFO_photon=true;
-    bool ok_nPFO=true;
-    bool ok_Frag_Energy=true;
-    */
-
-    //// Attempt at Gaudi standalone histograms
+    //// Plottin definitions
     Gaudi::Property<std::string> m_histPath{this,"HistPath","/PLOTS",
       "THistSvc directory (must include stream, e.g. '/PLOTS/...')."};
     Gaudi::Property<int> m_bins_sep {this, "SeparationBins", 18, "True photon separation [mm]"};
@@ -105,69 +82,10 @@ struct DiPhotonAnalysis final
    
     mutable TH1D *h_nPFO_photons_counts=nullptr, *h_nPFO_photons_weighted=nullptr, *h_nPFO_photons=nullptr, *h_nPFO=nullptr, *h_nPFO_counts=nullptr, *h_nPFO_weighted=nullptr, *h_Frag_Energy=nullptr;
 
-  //  std::map createMCPFOMaps(const edm4hep::MCParticleCollection& mcpColl, 
-  //                          const edm4hep::ReconstructedParticleCollection& pfoColl,
-  //                          const edm4hep::RecoMCParticleLinkCollection& linkColl){
-  //                              // Transcribed from original LCIO, following Anna's implementation: https://github.com/Zehvogel/k4Performance/blob/main/PFlowValidation/components/PFOtoMCviaClusterLink.cpp
-  //                              
-  //                              // Index MC Particle by Object ID
-  //                              std::map<podio::ObjectID, size_t, ObjectIDLess> mcIndex;
-  //                              for (size_t i=0; i<mcpColl.size(); ++i) mcIndex[ mcpColl[i].getObjectID() ] = i;
-  //
-  //                             // Collect primaries in vector
-  //                            std::vector<>
-  //   }
-
-  /*
-    TH1D* h_avg plot_weighted_average (const std::vector<double>& data,
-                                const std::vector<double>& weights,
-                                const int& nbins,
-                                const double& minE,
-                                const double& maxE){
-
-      std::vector<double> bin_edges(nbins+1);
-
-      double bin_width = (maxE - minE) / nbins;
-      for (int i = 0; i <= nbins; ++i) {
-        bin_edges[i] = minE + i*bin_width;
-      }
-
-      // Histograms
-      TH1D* h_counts   = new TH1D("h_counts", "counts", nbins, &bin_edges[0]);
-      TH1D* h_weighted = new TH1D("h_weighted", "weighted", nbins, &bin_edges[0]);
-      TH1D* h_avg      = (TH1D*)h_weighted->Clone("h_avg"); 
-
-      // Fill counts and weighted sums
-      for (size_t i = 0; i < data.size(); ++i) {
-          h_counts->Fill(data[i]);
-          h_weighted->Fill(data[i], weights[i]);
-      }
-
-      // Compute bin-wise average
-      h_avg->Divide(h_weighted, h_counts, "B");  // h_avg = h_weighted / h_counts
-
-      // Modify histogram style
-      h_avg->SetLineColor(kBlue);
-      h_avg->SetLineWidth(2);
-      h_avg->SetFillStyle(0);    // no fill (step)
-      h_avg->SetLineStyle(1);    // solid line
-
-      return h_avg;
-
-    }
-      */
     /// Initialize histograms etc
     StatusCode initialize() override{
       
       info() << "Initialising DiPhotonAnalysis" << endmsg;
-
-      //// Attempt at Gaudi standalone histograms
-      /*
-      mutable Gaudi::Accumulators::StaticHistogram<1> h_nPFO_photons{this, "Reco_photons_sep", "Avg. No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep};
-      mutable Gaudi::Accumulators::StaticHistogram<1> h_nPFO{this, "Reco_sep", "Avg. No. PFOs", m_bins_sep, m_min_sep, m_max_sep};
-      mutable Gaudi::Accumulators::StaticHistogram<1> h_Frag_Energy{this, "Frag_Energy", "Fractional Fragment Energy", m_bins_sep, m_min_sep, m_max_sep};
-      */
-
 
       h_nPFO_photons_counts = new TH1D("Reco_photons_sep_counts","No. Photon PFOs;d_{#gamma#gamma sep}[mm]; No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
       h_nPFO_photons_weighted = new TH1D("Reco_photons_sep_weighted","weighted No. Photon PFOs;d_{#gamma#gamma sep}[mm];weighted No. Photon PFOs", m_bins_sep, m_min_sep, m_max_sep);
@@ -181,38 +99,6 @@ struct DiPhotonAnalysis final
         return StatusCode::FAILURE;
       }
 
-      /*
-      m_histSvc = service("THistSvc", true);
-      if (!m_histSvc){
-          error() << "Could not get THistSvc!"<< endmsg;
-          return StatusCode::FAILURE;
-      }
-
-      // Register histograms
-    auto reg = [&](TH1* h){
-      const std::string full = m_histPath.value() + "/" + h->GetName();
-      return m_histSvc->regHist(full, h).isSuccess();
-    };
-
-    h_nPFO_photons = new TH1F("Reco_photons_sep","Avg. No. Photon PFOs;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
-    ok_nPFO_photon&=reg(h_nPFO_photons);
-    if(!ok_nPFO_photon) {
-      error() << "Failed to register nPFO_photons histogram" <<endmsg;
-      return StatusCode::FAILURE;
-    }
-    h_nPFO = new TH1F("Reco_sep","Avg. No. PFOs;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
-    ok_nPFO&=reg(h_nPFO);
-    if(!ok_nPFO) {
-      error() << "Failed to register nPFO histogram" <<endmsg;
-      return StatusCode::FAILURE;
-    }
-    h_Frag_Energy = new TH1F("Frag_Energy","Fractional Fragment Energy;d_{#gamma#gamma sep}[mm];Events", m_bins_sep, m_min_sep, m_max_sep);
-    ok_Frag_Energy&=reg(h_Frag_Energy);
-    if(!ok_Frag_Energy){
-      error() << "Failed to register Fragment Energy histogram" <<endmsg;
-      return StatusCode::FAILURE;
-    }
-    */
       debug() << "Did DiPhotonAnalysis Initialize " << endmsg;
 
       return Consumer::initialize();
@@ -221,8 +107,26 @@ struct DiPhotonAnalysis final
 
     void operator()(const edm4hep::ReconstructedParticleCollection& pfos,
                   const edm4hep::MCParticleCollection& mcps,
-                  const edm4hep::ClusterCollection&, //clus
+                  //const edm4hep::ClusterCollection&, //clus
                   const edm4hep::RecoMCParticleLinkCollection& RecoMCTruthLinks) const override {
+
+                    // First quick check on the number of mcps. This analysis code is only designed for two particles!
+                    size_t n_GenStat_one_particles = 0;
+                    for (size_t ir=0; ir<mcps.size(); ++ir){
+                      const auto& mc_particle = mcps[ir];
+                      debug() << "MC Particle number: " << ir << endmsg;
+                      const auto mc_particle_pdg = mc_particle.getPDG();
+
+                      debug() << "MC Particle PDG: " << mc_particle_pdg << endmsg;
+
+                      const auto mcp_genStat = mc_particle.getGeneratorStatus();
+                      debug() << "MC Particle Generator Status: " << mcp_genStat << endmsg;
+                      ++n_GenStat_one_particles;
+                    }
+
+                    if (n_GenStat_one_particles != 2) {
+                      error() << "This code is only designed to analyse and input of two particles!" << endmsg;
+                    }
 
                     // Loop over all PFOs to separate photon PFOs and fragment energy.
                     int nPFOs = 0;
@@ -234,6 +138,7 @@ struct DiPhotonAnalysis final
                     // Create a navigator to get mc particles related to PFO
                     podio::LinkNavigator RecoMCTruthLinkNavigator(RecoMCTruthLinks);
 
+                    // PFO loop
                     for (size_t ir=0; ir<pfos.size(); ++ir){
                       const auto& pfo = pfos[ir];
                       info() << "pfo number: " << ir << endmsg;
@@ -333,8 +238,6 @@ struct DiPhotonAnalysis final
                     // Use the two highest–energy photon PFOs.
                     double E_PFO_1 = photonPFOs[0].energy;
                     double E_PFO_2 = (photonPFOs.size() > 1) ? photonPFOs[1].energy : 0.0;
-                    Vector3D position_PFO_1 = photonPFOs[0].position;
-                    Vector3D position_PFO_2 = (photonPFOs.size() > 1) ? photonPFOs[1].position : Vector3D(0,0,0);
 
                     for (size_t i = 2; i < photonPFOs.size(); ++i) {
                       E_Frag += photonPFOs[i].energy;
@@ -352,19 +255,23 @@ struct DiPhotonAnalysis final
                     }
 
                     double frac_frag_energy = E_Frag / Total_PFO_Energy;
-                    Vector3D PFO_separation_vector(
-                        position_PFO_1.x() - position_PFO_2.x(),
-                        position_PFO_1.y() - position_PFO_2.y(),
-                        position_PFO_1.z() - position_PFO_2.z()
-                    );
-                    double PFO_separation = PFO_separation_vector.r();
-
                     debug() << " frac_frag_energy = " << E_Frag / Total_PFO_Energy << endmsg;
+                    
+                    // PFO separation not currently used but may be of interest
+                    
+                    // Vector3D position_PFO_1 = photonPFOs[0].position;
+                    // Vector3D position_PFO_2 = (photonPFOs.size() > 1) ? photonPFOs[1].position : Vector3D(0,0,0);
+
+                    //Vector3D PFO_separation_vector(
+                    //    position_PFO_1.x() - position_PFO_2.x(),
+                    //    position_PFO_1.y() - position_PFO_2.y(),
+                    //    position_PFO_1.z() - position_PFO_2.z()
+                    //);
+                    //double PFO_separation = PFO_separation_vector.r();
+
 
                     // Now retrieve the MC truth associated with each photon PFO,
-                    // choose MCParticle with the highest weight.
-                    //const edm4hep::MCParticle* mcForPFO1 = nullptr;
-                    //const edm4hep::MCParticle* mcForPFO2 = nullptr;
+                    // choose MCParticle with the highest weight in each case.
 
                     edm4hep::MCParticle mcForPFO1;
                     edm4hep::MCParticle mcForPFO2;
@@ -379,10 +286,10 @@ struct DiPhotonAnalysis final
                         debug() << "PFO 1, Which MC ID? " << mclinked.id() << endmsg;
                         if (weight > max_weight_MC1){
                           max_weight_MC1 = weight;
-                          mcForPFO1 =  mclinked; //&mclinked;                       
+                          mcForPFO1 =  mclinked;                    
+                        }
                       }
                     }
-                  }
                   else {warning() << "No MC Particle linked to PFO" << endmsg;}
 
                   debug() << "Done First PFO linking" << endmsg;
@@ -390,7 +297,7 @@ struct DiPhotonAnalysis final
                   if (photonPFOs.size() > 1) {
                     edm4hep::MCParticle Second_mcForPFO2;
                     if (photonPFOs.size() > 2) {
-                      info() << "More than 2 photon PFOs; Leading two used in True Separation calculation" << endmsg;
+                      info() << "More than 2 photon PFOs; MC particles with strongest links to leading two used in True Separation calculation" << endmsg;
                     }
                     debug() << "More than one Photon PFO" << endmsg;
                     auto related2 = RecoMCTruthLinkNavigator.getLinked(photonPFOs[1].pfo);
@@ -402,7 +309,7 @@ struct DiPhotonAnalysis final
                         debug() << "PFO 2, Which MC ID? " << mclinked.id() << endmsg;
                         if (weight > max_weight){
                           max_weight = weight;
-                          mcForPFO2 =  mclinked; //&mclinked; 
+                          mcForPFO2 =  mclinked;
                         }
                         
                         // also record second highest energy photon PFO
@@ -438,8 +345,6 @@ struct DiPhotonAnalysis final
                           index_max = i;
                         }
                       }
-                      // check this actually corresponds to the highest weight mc link used for PFO_1
-                      if (mcForPFO1.id() != related[index_max].o.id()) {warning() << "non-matching highest weighted MC in single PFO scenario!" << endmsg;}
                       mcForPFO1 = related[index_max].o;
 
                       debug() << "mcForPFO1.id() " << mcForPFO1.id() << "related[index_max].o.id() " << related[index_max].o.id()  << endmsg;// Then, find the candidate with the next highest weight
@@ -453,10 +358,8 @@ struct DiPhotonAnalysis final
                             index_second = i;
                         }
                       }
-                      //debug() << "Index_second" << index_second << "value: " << related[index_second] << endmsg;
                       auto linked = related[index_second];
-                      mcForPFO2 = linked.o;  //&(linked.o);
-                      //Vector3D vertex2(mcForPFO2->getVertex().x, mcForPFO2->getVertex().y, mcForPFO2->getVertex().z);
+                      mcForPFO2 = linked.o;
                     }
                     else {
                        // Fallback: if there is only one candidate (for whatever reason), assign it as mcForPFO2 as well.
@@ -472,7 +375,6 @@ struct DiPhotonAnalysis final
                   double mc_photon_2_x = 0.0, mc_photon_2_y = 0.0, mc_photon_2_z = 0.0;
                   Vector3D mc_photon_1_axis(0,0,0), mc_photon_2_axis(0,0,0);
 
-                   //if(mcForPFO1){
                    if (mcForPFO1.isAvailable()){
                       debug() << "MC PFO1 " <<    typeid(mcForPFO1).name() << " " << mcForPFO1 << endmsg;
                       Vector3D vertex1(mcForPFO1.getVertex().x, mcForPFO1.getVertex().y, mcForPFO1.getVertex().z);
@@ -492,7 +394,6 @@ struct DiPhotonAnalysis final
                       debug() << "Done MC for PFO 1" << endmsg;
                     }
 
-                    //if(mcForPFO2){
                     if (mcForPFO2.isAvailable()){
                       debug() << "MC PFO2 " <<    typeid(mcForPFO2).name() << " " <<  mcForPFO2 << endmsg;
                       Vector3D vertex2(mcForPFO2.getVertex().x, mcForPFO2.getVertex().y, mcForPFO2.getVertex().z);
@@ -515,7 +416,6 @@ struct DiPhotonAnalysis final
 
                     debug() << "About to get true di-photon separation" << endmsg;
                     double True_photon_separation = 0.0;
-                    //if(mcForPFO1 && mcForPFO2){
                     if (mcForPFO1.isAvailable() && mcForPFO2.isAvailable()){
                         True_photon_separation = std::sqrt(
                             std::pow(mc_photon_2_x - mc_photon_1_x, 2) +
@@ -527,17 +427,7 @@ struct DiPhotonAnalysis final
 
                      debug() << "True_photon_separation: " << True_photon_separation << endmsg;
 
-                    /// Still to do: plotting workflow
-
                     debug() << "About to fill histograms" << endmsg;
-
-                    // Fill (weighted) histograms
-                    // Gaudi
-                    /*
-                    h_nPFO_photons += std::make_pair(True_photon_separation, nPFOPhotons);
-                    h_nPFO += std::make_pair(True_photon_separation, nPFOs);
-                    h_Frag_Energy += std::make_pair(True_photon_separation, frac_frag_energy);
-                    */
 
                     // Fill histograms
                     h_nPFO_photons_counts->Fill(True_photon_separation);
@@ -547,12 +437,6 @@ struct DiPhotonAnalysis final
                     h_nPFO_photons_weighted->Fill(True_photon_separation, nPFOPhotons);
                     h_nPFO_weighted->Fill(True_photon_separation, nPFOs);
                     h_Frag_Energy->Fill(True_photon_separation, frac_frag_energy);
-
-                    //createMCPFOMaps();
-                    
-                    //PFOtoMCLink
-                    //MCtoPFOLink
-
             }
       
       StatusCode finalize() override {
