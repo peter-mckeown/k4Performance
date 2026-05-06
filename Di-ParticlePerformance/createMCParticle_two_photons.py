@@ -1,18 +1,21 @@
-##########################################################################################################################################################################
 #
-# Script for writing EDM4hep input files for di-photon benchmark.
-# Designed to create two particles (e.g. photons) with a given separation. The particles are created as if they flew on a straight line trajectory from the IP.
-# Current assumptions:
-#   - Configured maximum separation assumes particles are created at the surface of the calorimeter
-#   - Particles are created with a random rotation around the central axis between them
-#   - Test for the upper quadrant (along global y-axis) for the ILD detector
-# 
+# Copyright (c) 2020-2024 Key4hep-Project.
 #
-# @author P.McKeown, CERN
-# @author A.Korol, DESY
-# @date Dec. 2025
+# This file is part of Key4hep.
+# See https://key4hep.github.io/key4hep-doc/ for further info.
 #
-###########################################################################################################################################################################
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
 from pyLCIO import EVENT, UTIL, IOIMPL, IMPL
 
@@ -29,7 +32,7 @@ import numpy as np
 
 ### Author: P.McKeown, CERN, Aug 2024
 ### Adapted File to create MC Particles for passing to ddsim
-### Currently designed to create two particles (e.g. photons) orthogonal to the face of the ECAL Barrel, in this case of ILD. 
+### Currently designed to create two particles (e.g. photons) orthogonal to the face of the ECAL Barrel, in this case of ILD.
 ### The separation between the two particles is varied uniformly in the range [0, maxSep], with the midpoint between the two particles along the global Z axis being set by centralPosZ
 ### The energy of each particle is varied uniformly (and independently) between Emax and Emin
 
@@ -46,16 +49,16 @@ def get_parser():
     parser.add_argument('--mass', action='store',
                         type=int, default=0,
                         help='Mass')
-    
+
     parser.add_argument('--charge', action='store',
                         type=int, default=0,
                         help='Charge')
-    
+
     '''
     parser.add_argument('--angleMin_theta', action='store',
                         type=int, default=30,
                         help='Minimum theta angle of incident particle input: deg, converted to [Rad]')
-    
+
     parser.add_argument('--angleMax_theta', action='store',
                         type=int, default=90,
                         help='Maximum theta angle of incident particle input:deg, converted to [Rad]')
@@ -122,7 +125,7 @@ def calculate_energy_and_momentum(mass, p, position, y_dir):
     direction = np.array([x, y_dir, z], dtype=float)
     direction = direction / np.linalg.norm(direction)
     energy = math.sqrt(mass * mass + p * p)
-    momentum = array('f', [p * direction[0], p * direction[1], p * direction[2]])  
+    momentum = array('f', [p * direction[0], p * direction[1], p * direction[2]])
     return energy, momentum
 
 def sample_points(radius, n_points, sep):
@@ -134,15 +137,15 @@ def sample_points(radius, n_points, sep):
         center_x = center_dist * np.cos(angle)
         center_y = center_dist * np.sin(angle)
         center = np.array([center_x, center_y])
-        
+
         # Sample a random distance between 0 and sep
         dist = np.random.uniform(0, sep)
-        
+
         # Calculate the two points equidistant from the center along a line
         dx = dist / 2
         point1 = np.array([center_x + dx, center_y])
         point2 = np.array([center_x - dx, center_y])
-        
+
         # Rotate the points around the center by a random angle
         rotation_angle = np.random.uniform(0, 2 * np.pi)
         rotation_matrix = np.array([
@@ -151,14 +154,14 @@ def sample_points(radius, n_points, sep):
         ])
         point1 = center + np.dot(rotation_matrix, point1 - center)
         point2 = center + np.dot(rotation_matrix, point2 - center)
-        
+
         points.append((point1, point2))
-        
+
     return np.array(points)  # shape (n_points, 2, 2)
 
 def create_vertex_and_endpoint(positions, centralPosY, centralPosZ):
     vy = centralPosY
-    
+
     vx_1, vz_1 = positions[0]
     vx_2, vz_2 = positions[1]
 
@@ -184,33 +187,33 @@ def create_mcparticle(genstat, mass, pdg, momentum, charge, vertex, endpoint):
 def write_to_lcio(outfile, nevt, pdg, mass, charge, maxSep, centralPosX, centralPosY, centralPosZ, Emax, Emin):
     wrt = initialize_writer(outfile)
     random.seed()
-    
+
     genstat = 1
     write_run_header(wrt, pdg, charge, mass)
 
     positions = sample_points(10, nevt, maxSep)
     positions[:, :, 0] = positions[:, :, 0] + centralPosX
     positions[:, :, 1] = positions[:, :, 1] + centralPosZ
-    
+
     for j in range(nevt):
         evt, col = initialize_event(j)
-        
+
         # Sample energies (or momentum magnitudes) for each particle
         p1, p2 = random.uniform(Emin, Emax), random.uniform(Emin, Emax)
-        
+
         energy1, momentum1 = calculate_energy_and_momentum(mass, p1, positions[j][0])
         energy2, momentum2 = calculate_energy_and_momentum(mass, p2, positions[j][1])
-        
+
         vertex1, endpoint1, vertex2, endpoint2 = create_vertex_and_endpoint(positions[j], centralPosY, centralPosZ)
-        
+
         mcp1 = create_mcparticle(genstat, mass, pdg, momentum1, charge, vertex1, endpoint1)
         mcp2 = create_mcparticle(genstat, mass, pdg, momentum2, charge, vertex2, endpoint2)
-        
+
         col.addElement(mcp1)
         col.addElement(mcp2)
-        
+
         wrt.writeEvent(evt)
-        
+
         # Compute normalized direction vectors from the momentum vectors.
         norm1 = np.linalg.norm(momentum1)
         norm2 = np.linalg.norm(momentum2)
@@ -222,7 +225,7 @@ def write_to_lcio(outfile, nevt, pdg, mass, charge, maxSep, centralPosX, central
             dir2 = np.array(momentum2, dtype=float) / norm2
         else:
             dir2 = np.array([0.0, 0.0, 0.0])
-    
+
     wrt.close()
     return 0
 
@@ -295,8 +298,8 @@ def write_to_edm4hep(outfile, nevt, pdg, mass, charge, maxSep, centralPosX, cent
 if __name__ == "__main__":
 
     parser = get_parser()
-    parse_args = parser.parse_args() 
-    
+    parse_args = parser.parse_args()
+
     pdgid = parse_args.pdg
     mass = parse_args.mass
     charge = parse_args.charge
