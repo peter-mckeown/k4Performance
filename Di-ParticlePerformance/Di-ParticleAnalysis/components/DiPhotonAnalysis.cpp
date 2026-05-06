@@ -16,7 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "DiPhotonAnalysis.hpp"
 
 #include <Eigen/Dense>
 #include <algorithm>
