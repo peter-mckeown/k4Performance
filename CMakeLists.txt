@@ -49,5 +49,6 @@ endfunction()
 
 add_subdirectory(RecoMCTruthLinkers)
 add_subdirectory(Di-ParticlePerformance/Di-ParticleAnalysis)
+add_subdirectory(TrackingPerformance)
 
 include(cmake/CreateProjectConfig.cmake)
